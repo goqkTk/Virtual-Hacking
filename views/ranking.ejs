@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>랭킹 - 모의 해킹 사이트</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">모의 해킹 사이트</a>
+            <div class="navbar-nav">
+                <a class="nav-link" href="/problems">문제</a>
+                <a class="nav-link active" href="/ranking">랭킹</a>
+                <a class="nav-link" href="/logout">로그아웃</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-5">
+        <h2>랭킹</h2>
+        <div class="table-responsive mt-4">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>순위</th>
+                        <th>사용자명</th>
+                        <th>해결한 문제 수</th>
+                        <th>총 점수</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% rankings.forEach(function(rank, index) { %>
+                        <tr>
+                            <td><%= index + 1 %></td>
+                            <td><%= rank.username %></td>
+                            <td><%= rank.solved_count %></td>
+                            <td><%= rank.total_points || 0 %></td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html> 
