@@ -17,7 +17,7 @@ app.set('views', path.join(__dirname, 'views'));
 
 // 세션 설정
 app.use(session({
-    secret: 'your-secret-key',
+    secret: 'superduperholymolylegendpublickey',
     resave: false,
     saveUninitialized: true
 }));
@@ -154,7 +154,6 @@ app.get('/ranking', (req, res) => {
     });
 });
 
-// 서버 시작
-app.listen(port, () => {
-    console.log(`서버가 http://localhost:${port} 에서 실행 중입니다.`);
+app.listen('0.0.0.0', port, () => {
+    console.log(`서버가 http://0.0.0.0:${port} 에서 실행 중입니다.`);
 }); 
