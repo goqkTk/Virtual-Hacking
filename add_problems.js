@@ -1,40 +1,49 @@
+require('dotenv').config();
 const sqlite3 = require('sqlite3').verbose();
-const db = new sqlite3.Database('database.db');
+const bcrypt = require('bcrypt');
+const db = new sqlite3.Database(process.env.DB_PATH);
 
-// 문제 데이터
+// 문제 데이터 (FLAG는 환경변수에서 가져옴)
 const problems = [
     {
         title: "소스 보기",
         description: "웹페이지의 소스 코드를 확인해보세요. FLAG가 숨겨져 있을지도?",
-        flag: "FLAG{view_source_is_easy}",
+        flag: process.env.FLAG_VIEW_SOURCE,
         category: "Web",
         points: 50
     },
     {
         title: "쿠키 조작",
         description: "쿠키를 수정하면 관리자 권한을 얻을 수 있을지도?",
-        flag: "FLAG{cookie_is_power}",
+        flag: process.env.FLAG_COOKIE_POWER,
         category: "Web",
         points: 100
     },
     {
+        title: "SQL Injection",
+        description: "admin 계정으로 로그인하세요",
+        flag: process.env.FLAG_SQL_INJECTION,
+        category: "Web",
+        points: 200
+    },
+    {
         title: "Base64 디코딩",
         description: "다음 문자열을 Base64로 디코딩하세요: RkxBR3tiYXNlNjRfaXNfZnVufQ==",
-        flag: "FLAG{base64_is_fun}",
+        flag: process.env.FLAG_BASE64,
         category: "Crypto",
         points: 50
     },
     {
         title: "시저 암호",
         description: "다음 문자열을 시저 암호로 복호화하세요: khoor zruog",
-        flag: "FLAG{hello_world}",
+        flag: process.env.FLAG_CAESAR,
         category: "Crypto",
         points: 75
     },
     {
         title: "숨겨진 이미지",
         description: "이미지 파일에 FLAG가 숨겨져 있습니다. 찾아보세요!",
-        flag: "FLAG{hidden_in_image}",
+        flag: process.env.FLAG_HIDDEN_IMAGE,
         category: "Forensic",
         points: 150
     }
@@ -76,7 +85,6 @@ function addProblems() {
     });
 }
 
-// 실행
 addProblems();
 
 // 데이터베이스 연결 종료

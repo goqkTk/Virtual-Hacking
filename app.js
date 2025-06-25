@@ -32,13 +32,6 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// 로그인 시도 제한
-const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15분
-    max: 5, // IP당 최대 로그인 시도 수
-    message: '로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요.'
-});
-
 // 미들웨어 설정
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
@@ -121,8 +114,8 @@ db.serialize(() => {
 function validateInput(input, maxLength = 100) {
     if (!input || typeof input !== 'string') return false;
     if (input.length > maxLength) return false;
-    // XSS 방지를 위한 특수문자 필터링
-    const dangerousChars = /[<>\"'&]/;
+    // XSS 방지를 위한 특수문자 필터링 (SQL 인젝션을 위해 작은따옴표 제외)
+    const dangerousChars = /[<>\"&]/;
     return !dangerousChars.test(input);
 }
 
@@ -170,48 +163,71 @@ app.get('/login', (req, res) => {
     res.render('login');
 });
 
-app.post('/login', validateCSRF, (req, res) => {
+app.post('/login', (req, res) => {
     const { username, password } = req.body;
-
-    // SQL Injection 취약점: username과 password 모두에 주입 가능
+    
+    // 의도적인 SQL 인젝션 취약점: 사용자 입력을 직접 쿼리에 삽입
     const query = `SELECT * FROM users WHERE username = '${username}' AND password = '${password}'`;
-
-    db.get(query, [], async (err, user) => {
+    
+    db.get(query, (err, user) => {
         if (err) {
             console.error('로그인 오류:', err);
             return res.status(500).send('로그인 중 오류가 발생했습니다.');
         }
         
         if (user) {
-            // SQL Injection으로 로그인 성공
+            // SQL 인젝션으로 로그인 성공
+            req.session.user = {
+                id: user.id,
+                username: user.username,
+                score: user.score
+            };
+            
+            // admin 계정인 경우 flag 설정
             if (user.username === 'admin') {
                 req.session.adminFlag = process.env.FLAG_SQL_INJECTION;
             }
-            req.session.user = { id: user.id, username: user.username };
-            res.redirect('/');
-        } else {
-            // SQL Injection 실패 시 일반 로그인 시도
-            db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
+            
+            return res.redirect('/');
+        }
+        
+        // SQL 인젝션 실패 시 정상 로그인 시도
+        db.get('SELECT * FROM users WHERE username = ?', [username], (err, user) => {
+            if (err) {
+                console.error('로그인 오류:', err);
+                return res.status(500).send('로그인 중 오류가 발생했습니다.');
+            }
+            
+            if (!user) {
+                return res.status(401).send('사용자명 또는 비밀번호가 잘못되었습니다.');
+            }
+            
+            // 비밀번호 검증
+            bcrypt.compare(password, user.password, (err, isMatch) => {
                 if (err) {
-                    console.error('로그인 오류:', err);
+                    console.error('비밀번호 검증 오류:', err);
                     return res.status(500).send('로그인 중 오류가 발생했습니다.');
                 }
-                if (user) {
-                    const match = await bcrypt.compare(password, user.password);
-                    if (match) {
-                        if (user.username === 'admin') {
-                            req.session.adminFlag = process.env.FLAG_SQL_INJECTION;
-                        }
-                        req.session.user = { id: user.id, username: user.username };
-                        res.redirect('/');
-                    } else {
-                        res.status(400).send('비밀번호가 일치하지 않습니다');
-                    }
-                } else {
-                    res.status(400).send('사용자를 찾을 수 없습니다');
+                
+                if (!isMatch) {
+                    return res.status(401).send('사용자명 또는 비밀번호가 잘못되었습니다.');
                 }
+                
+                // 정상 로그인 성공
+                req.session.user = {
+                    id: user.id,
+                    username: user.username,
+                    score: user.score
+                };
+                
+                // admin 계정인 경우 flag 설정
+                if (user.username === 'admin') {
+                    req.session.adminFlag = process.env.FLAG_SQL_INJECTION;
+                }
+                
+                res.redirect('/');
             });
-        }
+        });
     });
 });
 
@@ -231,7 +247,7 @@ app.get('/register', (req, res) => {
     res.render('register');
 });
 
-app.post('/register', validateCSRF, async (req, res) => {
+app.post('/register', async (req, res) => {
     const { username, password } = req.body;
 
     try {
@@ -320,4 +336,4 @@ app.use((err, req, res, next) => {
 // 서버 시작
 app.listen(port, () => {
     console.log(`서버가 http://localhost:${port} 에서 실행 중입니다.`);
-}); 
+});
