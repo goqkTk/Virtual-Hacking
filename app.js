@@ -1,12 +1,43 @@
+require('dotenv').config();
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const session = require('express-session');
 const bodyParser = require('body-parser');
 const path = require('path');
 const bcrypt = require('bcrypt');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT;
+
+// 보안 미들웨어 설정
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+            imgSrc: ["'self'", "data:", "https:"],
+        },
+    },
+}));
+
+// Rate limiting 설정
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15분
+    max: 100, // IP당 최대 요청 수
+    message: '너무 많은 요청이 발생했습니다. 잠시 후 다시 시도해주세요.'
+});
+app.use(limiter);
+
+// 로그인 시도 제한
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15분
+    max: 5, // IP당 최대 로그인 시도 수
+    message: '로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요.'
+});
 
 // 미들웨어 설정
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -17,17 +48,43 @@ app.set('views', path.join(__dirname, 'views'));
 
 // 세션 설정
 app.use(session({
-    secret: 'superduperholymolylegendpublickey',
+    secret: process.env.SESSION_SECRET,
     resave: false,
-    saveUninitialized: true
+    saveUninitialized: false,
+    cookie: {
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000 // 24시간
+    }
 }));
 
-// 데이터베이스 연결
-const db = new sqlite3.Database('database.db', (err) => {
-    if (err) {
-        console.error(err.message);
+// CSRF 토큰 미들웨어
+app.use((req, res, next) => {
+    if (!req.session.csrfToken) {
+        req.session.csrfToken = crypto.randomBytes(32).toString('hex');
     }
-    console.log('데이터베이스에 연결되었습니다.');
+    res.locals.csrfToken = req.session.csrfToken;
+    next();
+});
+
+// CSRF 검증 함수
+function validateCSRF(req, res, next) {
+    if (req.method === 'GET') return next();
+    
+    const token = req.body._csrf || req.headers['x-csrf-token'];
+    if (!token || token !== req.session.csrfToken) {
+        return res.status(403).send('CSRF 토큰이 유효하지 않습니다.');
+    }
+    next();
+}
+
+// 데이터베이스 연결
+const db = new sqlite3.Database(process.env.DB_PATH, (err) => {
+    if (err) {
+        console.error('데이터베이스 연결 오류:', err.message);
+    } else {
+        console.log('데이터베이스에 연결되었습니다.');
+    }
 });
 
 // 데이터베이스 테이블 생성
@@ -60,78 +117,172 @@ db.serialize(() => {
     )`);
 });
 
+// 입력 검증 함수
+function validateInput(input, maxLength = 100) {
+    if (!input || typeof input !== 'string') return false;
+    if (input.length > maxLength) return false;
+    // XSS 방지를 위한 특수문자 필터링
+    const dangerousChars = /[<>\"'&]/;
+    return !dangerousChars.test(input);
+}
+
 // 라우트 설정
 app.get('/', (req, res) => {
-    res.render('index', { user: req.session.user });
+    if (!req.session.user) {
+        return res.render('index', { user: null, problemGroups: null, categories: null, adminFlag: null });
+    }
+
+    // admin 계정이면 문제 목록을 보여주지 않음
+    if (req.session.user.username === 'admin') {
+        return res.render('index', { user: req.session.user, problemGroups: {}, categories: [], adminFlag: req.session.adminFlag });
+    }
+
+    db.all('SELECT * FROM problems ORDER BY points', [], (err, problems) => {
+        if (err) {
+            console.error('문제 조회 오류:', err);
+            return res.status(500).render('error', { message: '서버 오류가 발생했습니다.' });
+        }
+
+        if (!problems || problems.length === 0) {
+            return res.render('index', { user: req.session.user, problemGroups: {}, categories: [], adminFlag: req.session.adminFlag });
+        }
+
+        // 카테고리별로 문제 그룹화
+        const problemGroups = problems.reduce((acc, problem) => {
+            const category = problem.category;
+            if (!acc[category]) {
+                acc[category] = [];
+            }
+            acc[category].push(problem);
+            return acc;
+        }, {});
+        
+        const categories = Object.keys(problemGroups);
+
+        res.render('index', { user: req.session.user, problemGroups, categories, adminFlag: req.session.adminFlag });
+    });
 });
 
 app.get('/login', (req, res) => {
+    if (req.session.user) {
+        return res.redirect('/');
+    }
     res.render('login');
 });
 
-app.post('/login', (req, res) => {
+app.post('/login', validateCSRF, (req, res) => {
     const { username, password } = req.body;
-    db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
+
+    // SQL Injection 취약점: username과 password 모두에 주입 가능
+    const query = `SELECT * FROM users WHERE username = '${username}' AND password = '${password}'`;
+
+    db.get(query, [], async (err, user) => {
         if (err) {
-            return res.status(500).send('서버 오류');
+            console.error('로그인 오류:', err);
+            return res.status(500).send('로그인 중 오류가 발생했습니다.');
         }
-        if (!user) {
-            return res.status(400).send('사용자를 찾을 수 없습니다');
-        }
-        const match = await bcrypt.compare(password, user.password);
-        if (match) {
+        
+        if (user) {
+            // SQL Injection으로 로그인 성공
+            if (user.username === 'admin') {
+                req.session.adminFlag = process.env.FLAG_SQL_INJECTION;
+            }
             req.session.user = { id: user.id, username: user.username };
-            res.redirect('/problems');
+            res.redirect('/');
         } else {
-            res.status(400).send('비밀번호가 일치하지 않습니다');
+            // SQL Injection 실패 시 일반 로그인 시도
+            db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
+                if (err) {
+                    console.error('로그인 오류:', err);
+                    return res.status(500).send('로그인 중 오류가 발생했습니다.');
+                }
+                if (user) {
+                    const match = await bcrypt.compare(password, user.password);
+                    if (match) {
+                        if (user.username === 'admin') {
+                            req.session.adminFlag = process.env.FLAG_SQL_INJECTION;
+                        }
+                        req.session.user = { id: user.id, username: user.username };
+                        res.redirect('/');
+                    } else {
+                        res.status(400).send('비밀번호가 일치하지 않습니다');
+                    }
+                } else {
+                    res.status(400).send('사용자를 찾을 수 없습니다');
+                }
+            });
         }
+    });
+});
+
+app.get('/logout', (req, res) => {
+    req.session.destroy((err) => {
+        if (err) {
+            console.error('로그아웃 오류:', err);
+        }
+        res.redirect('/');
     });
 });
 
 app.get('/register', (req, res) => {
+    if (req.session.user) {
+        return res.redirect('/');
+    }
     res.render('register');
 });
 
-app.post('/register', async (req, res) => {
+app.post('/register', validateCSRF, async (req, res) => {
     const { username, password } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 10);
-    
-    db.run('INSERT INTO users (username, password) VALUES (?, ?)',
-        [username, hashedPassword],
-        function(err) {
-            if (err) {
-                return res.status(400).send('이미 존재하는 사용자명입니다');
-            }
-            res.redirect('/login');
-        });
-});
 
-app.get('/problems', (req, res) => {
-    if (!req.session.user) {
-        return res.redirect('/login');
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
+        db.run('INSERT INTO users (username, password) VALUES (?, ?)',
+            [username, hashedPassword],
+            function(err) {
+                if (err) {
+                    if (err.message.includes('UNIQUE constraint failed')) {
+                        return res.status(400).send('이미 존재하는 사용자명입니다');
+                    }
+                    console.error('회원가입 오류:', err);
+                    return res.status(500).send('회원가입 중 오류가 발생했습니다.');
+                }
+                res.redirect('/login');
+            });
+    } catch (error) {
+        console.error('비밀번호 해싱 오류:', error);
+        res.status(500).send('회원가입 중 오류가 발생했습니다.');
     }
-    db.all('SELECT * FROM problems', [], (err, problems) => {
-        if (err) {
-            return res.status(500).send('서버 오류');
-        }
-        res.render('problems', { problems, user: req.session.user });
-    });
 });
 
 app.post('/submit', (req, res) => {
     if (!req.session.user) {
         return res.status(401).send('로그인이 필요합니다');
     }
+    
     const { problemId, flag } = req.body;
+    
+    if (!validateInput(flag, 200)) {
+        return res.status(400).json({ success: false, message: '잘못된 입력입니다.' });
+    }
     
     db.get('SELECT * FROM problems WHERE id = ?', [problemId], (err, problem) => {
         if (err) {
-            return res.status(500).send('서버 오류');
+            console.error('문제 조회 오류:', err);
+            return res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
         }
+        if (!problem) {
+            return res.status(404).json({ success: false, message: '문제를 찾을 수 없습니다.' });
+        }
+        
         if (problem.flag === flag) {
             db.run('INSERT INTO solved_problems (user_id, problem_id) VALUES (?, ?)',
-                [req.session.user.id, problemId]);
-            res.json({ success: true, message: '정답입니다!' });
+                [req.session.user.id, problemId], (err) => {
+                    if (err) {
+                        console.error('해결 기록 저장 오류:', err);
+                    }
+                    res.json({ success: true, message: '정답입니다!' });
+                });
         } else {
             res.json({ success: false, message: '틀렸습니다.' });
         }
@@ -148,12 +299,25 @@ app.get('/ranking', (req, res) => {
         ORDER BY total_points DESC
     `, [], (err, rankings) => {
         if (err) {
-            return res.status(500).send('서버 오류');
+            console.error('랭킹 조회 오류:', err);
+            return res.status(500).render('error', { message: '서버 오류가 발생했습니다.' });
         }
         res.render('ranking', { rankings });
     });
 });
 
-app.listen('0.0.0.0', port, () => {
-    console.log(`서버가 http://0.0.0.0:${port} 에서 실행 중입니다.`);
+// 404 에러 처리
+app.use((req, res) => {
+    res.status(404).render('error', { message: '페이지를 찾을 수 없습니다.' });
+});
+
+// 전역 에러 처리
+app.use((err, req, res, next) => {
+    console.error('서버 오류:', err);
+    res.status(500).render('error', { message: '서버 오류가 발생했습니다.' });
+});
+
+// 서버 시작
+app.listen(port, () => {
+    console.log(`서버가 http://localhost:${port} 에서 실행 중입니다.`);
 }); 
