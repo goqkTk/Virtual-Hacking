@@ -165,8 +165,6 @@ app.get('/login', (req, res) => {
 
 app.post('/login', (req, res) => {
     const { username, password } = req.body;
-    
-    // 의도적인 SQL 인젝션 취약점: 사용자 입력을 직접 쿼리에 삽입
     const query = `SELECT * FROM users WHERE username = '${username}' AND password = '${password}'`;
     
     db.get(query, (err, user) => {
@@ -176,14 +174,12 @@ app.post('/login', (req, res) => {
         }
         
         if (user) {
-            // SQL 인젝션으로 로그인 성공
             req.session.user = {
                 id: user.id,
                 username: user.username,
                 score: user.score
             };
             
-            // admin 계정인 경우 flag 설정
             if (user.username === 'admin') {
                 req.session.adminFlag = process.env.FLAG_SQL_INJECTION;
             }
@@ -191,7 +187,6 @@ app.post('/login', (req, res) => {
             return res.redirect('/');
         }
         
-        // SQL 인젝션 실패 시 정상 로그인 시도
         db.get('SELECT * FROM users WHERE username = ?', [username], (err, user) => {
             if (err) {
                 console.error('로그인 오류:', err);
@@ -202,7 +197,6 @@ app.post('/login', (req, res) => {
                 return res.status(401).send('사용자명 또는 비밀번호가 잘못되었습니다.');
             }
             
-            // 비밀번호 검증
             bcrypt.compare(password, user.password, (err, isMatch) => {
                 if (err) {
                     console.error('비밀번호 검증 오류:', err);
@@ -213,14 +207,12 @@ app.post('/login', (req, res) => {
                     return res.status(401).send('사용자명 또는 비밀번호가 잘못되었습니다.');
                 }
                 
-                // 정상 로그인 성공
                 req.session.user = {
                     id: user.id,
                     username: user.username,
                     score: user.score
                 };
                 
-                // admin 계정인 경우 flag 설정
                 if (user.username === 'admin') {
                     req.session.adminFlag = process.env.FLAG_SQL_INJECTION;
                 }
@@ -322,18 +314,15 @@ app.get('/ranking', (req, res) => {
     });
 });
 
-// 404 에러 처리
 app.use((req, res) => {
     res.status(404).render('error', { message: '페이지를 찾을 수 없습니다.' });
 });
 
-// 전역 에러 처리
 app.use((err, req, res, next) => {
     console.error('서버 오류:', err);
     res.status(500).render('error', { message: '서버 오류가 발생했습니다.' });
 });
 
-// 서버 시작
 app.listen(port, () => {
     console.log(`서버가 http://localhost:${port} 에서 실행 중입니다.`);
 });

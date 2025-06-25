@@ -22,14 +22,12 @@
 
     <div class="container mt-5">
     <% if (user && categories && categories.length > 0) { %>
-        <!-- Admin FLAG 표시 -->
         <% if (adminFlag) { %>
             <div class="alert alert-success">
                 <strong>FLAG:</strong> <code><%= adminFlag %></code>
             </div>
         <% } %>
         
-        <!-- Nav tabs -->
         <ul class="nav nav-tabs" id="problemTabs" role="tablist">
             <% categories.forEach((category, index) => { %>
                 <li class="nav-item" role="presentation">
@@ -38,16 +36,14 @@
             <% }) %>
         </ul>
 
-        <!-- Tab panes -->
         <div class="tab-content" id="problemTabsContent">
             <% categories.forEach((category, index) => { %>
                 <div class="tab-pane fade <%= index === 0 ? 'show active' : '' %>" id="tab-pane-<%= category.toLowerCase() %>" role="tabpanel" aria-labelledby="<%= category.toLowerCase() %>-tab" tabindex="0">
-                    
-                    <!-- Accordion for problems in this category -->
                     <div class="accordion mt-4" id="accordion-<%= category.toLowerCase() %>">
                         <% problemGroups[category].forEach((problem, i) => { %>
                             <div class="accordion-item">
                                 <h2 class="accordion-header" id="heading-<%= problem.id %>">
+                                    <!-- FLAG{vi2w_s0urce_1s_ea3y} -->
                                     <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-<%= problem.id %>" aria-expanded="false" aria-controls="collapse-<%= problem.id %>">
                                         <strong><%= problem.title %></strong>
                                         <span class="ms-auto text-muted"><%= problem.points %>점</span>
@@ -58,7 +54,7 @@
                                         <p><%= problem.description %></p>
                                         <% if (problem.title === "SQL Injection") { %>
                                             <div class="alert alert-info">
-                                                <pre><code>const query = `SELECT * FROM users WHERE username = '${username}'`;</code></pre>
+                                                <pre><code>const query = `SELECT * FROM users WHERE username = '${username}' AND password = '${password}'`;</code></pre>
                                             </div>
                                         <% } %>
                                         <div class="input-group mb-3">
@@ -76,7 +72,6 @@
             <% }) %>
         </div>
     <% } else if (user) { %>
-        <!-- Admin FLAG 표시 (문제가 없을 때) -->
         <% if (adminFlag) { %>
             <div class="alert alert-success">
                 <strong>FLAG:</strong> <code><%= adminFlag %></code>

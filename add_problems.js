@@ -3,7 +3,6 @@ const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcrypt');
 const db = new sqlite3.Database(process.env.DB_PATH);
 
-// 문제 데이터 (FLAG는 환경변수에서 가져옴)
 const problems = [
     {
         title: "소스 보기",
@@ -27,15 +26,15 @@ const problems = [
         points: 200
     },
     {
-        title: "Base64 디코딩",
-        description: "다음 문자열을 Base64로 디코딩하세요: RkxBR3tiYXNlNjRfaXNfZnVufQ==",
+        title: "Base64",
+        description: "RkxBR3s2YXNlNkFfMXNfZnVufQ==",
         flag: process.env.FLAG_BASE64,
         category: "Crypto",
         points: 50
     },
     {
         title: "시저 암호",
-        description: "다음 문자열을 시저 암호로 복호화하세요: khoor zruog",
+        description: "CIXD{e21iL_t0o1a}",
         flag: process.env.FLAG_CAESAR,
         category: "Crypto",
         points: 75
@@ -49,10 +48,8 @@ const problems = [
     }
 ];
 
-// 문제 추가 함수
 function addProblems() {
     db.serialize(() => {
-        // 기존 문제 삭제 (선택사항)
         db.run("DELETE FROM problems", (err) => {
             if (err) {
                 console.error("기존 문제 삭제 중 오류:", err);
@@ -61,7 +58,6 @@ function addProblems() {
             console.log("기존 문제가 삭제되었습니다.");
         });
 
-        // 새 문제 추가
         const stmt = db.prepare("INSERT INTO problems (title, description, flag, category, points) VALUES (?, ?, ?, ?, ?)");
         
         problems.forEach(problem => {
@@ -87,7 +83,6 @@ function addProblems() {
 
 addProblems();
 
-// 데이터베이스 연결 종료
 db.close((err) => {
     if (err) {
         console.error("데이터베이스 연결 종료 중 오류:", err);
