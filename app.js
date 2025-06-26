@@ -165,7 +165,12 @@ app.get('/login', (req, res) => {
 
 app.post('/login', (req, res) => {
     const { username, password } = req.body;
-    const query = `SELECT * FROM users WHERE username = '${username}' AND password = '${password}'`;
+    
+    // SHA-256으로 고정된 해시값 생성
+    const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
+    
+    // SQL 인젝션 취약점 - 사용자명과 해시화된 비밀번호를 모두 비교
+    const query = `SELECT * FROM users WHERE username = '${username}' AND password = '${hashedPassword}'`;
     
     db.get(query, (err, user) => {
         if (err) {
@@ -185,41 +190,9 @@ app.post('/login', (req, res) => {
             }
             
             return res.redirect('/');
+        } else {
+            return res.status(401).send('사용자명 또는 비밀번호가 잘못되었습니다.');
         }
-        
-        db.get('SELECT * FROM users WHERE username = ?', [username], (err, user) => {
-            if (err) {
-                console.error('로그인 오류:', err);
-                return res.status(500).send('로그인 중 오류가 발생했습니다.');
-            }
-            
-            if (!user) {
-                return res.status(401).send('사용자명 또는 비밀번호가 잘못되었습니다.');
-            }
-            
-            bcrypt.compare(password, user.password, (err, isMatch) => {
-                if (err) {
-                    console.error('비밀번호 검증 오류:', err);
-                    return res.status(500).send('로그인 중 오류가 발생했습니다.');
-                }
-                
-                if (!isMatch) {
-                    return res.status(401).send('사용자명 또는 비밀번호가 잘못되었습니다.');
-                }
-                
-                req.session.user = {
-                    id: user.id,
-                    username: user.username,
-                    score: user.score
-                };
-                
-                if (user.username === 'admin') {
-                    req.session.adminFlag = process.env.FLAG_SQL_INJECTION;
-                }
-                
-                res.redirect('/');
-            });
-        });
     });
 });
 
@@ -243,7 +216,8 @@ app.post('/register', async (req, res) => {
     const { username, password } = req.body;
 
     try {
-        const hashedPassword = await bcrypt.hash(password, 10);
+        // SHA-256으로 고정된 해시값 생성
+        const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
         
         db.run('INSERT INTO users (username, password) VALUES (?, ?)',
             [username, hashedPassword],
