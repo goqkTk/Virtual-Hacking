@@ -8,6 +8,7 @@ const bcrypt = require('bcrypt');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 const port = process.env.PORT;
@@ -19,6 +20,7 @@ app.use(helmet({
             defaultSrc: ["'self'"],
             styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
             scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+            scriptSrcAttr: ["'unsafe-inline'"],
             imgSrc: ["'self'", "data:", "https:"],
         },
     },
@@ -38,6 +40,7 @@ app.use(bodyParser.json());
 app.use(express.static('public'));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+app.use(cookieParser());
 
 // 세션 설정
 app.use(session({
@@ -114,7 +117,6 @@ db.serialize(() => {
 function validateInput(input, maxLength = 100) {
     if (!input || typeof input !== 'string') return false;
     if (input.length > maxLength) return false;
-    // XSS 방지를 위한 특수문자 필터링 (SQL 인젝션을 위해 작은따옴표 제외)
     const dangerousChars = /[<>\"&]/;
     return !dangerousChars.test(input);
 }
@@ -122,14 +124,14 @@ function validateInput(input, maxLength = 100) {
 // 라우트 설정
 app.get('/', (req, res) => {
     if (!req.session.user) {
-        return res.render('index', { user: null, problemGroups: null, categories: null, adminFlag: null });
+        return res.render('index', { user: null, problemGroups: null, categories: null, adminFlag: null, solvedProblems: [], cookieFlag: res.locals.cookieFlag });
     }
 
-    // admin 계정이면 문제 목록을 보여주지 않음
     if (req.session.user.username === 'admin') {
-        return res.render('index', { user: req.session.user, problemGroups: {}, categories: [], adminFlag: req.session.adminFlag });
+        return res.render('index', { user: req.session.user, problemGroups: {}, categories: [], adminFlag: req.session.adminFlag, solvedProblems: [], cookieFlag: res.locals.cookieFlag });
     }
 
+    // 문제 목록과 사용자가 해결한 문제 목록을 함께 가져오기
     db.all('SELECT * FROM problems ORDER BY points', [], (err, problems) => {
         if (err) {
             console.error('문제 조회 오류:', err);
@@ -137,22 +139,38 @@ app.get('/', (req, res) => {
         }
 
         if (!problems || problems.length === 0) {
-            return res.render('index', { user: req.session.user, problemGroups: {}, categories: [], adminFlag: req.session.adminFlag });
+            return res.render('index', { user: req.session.user, problemGroups: {}, categories: [], adminFlag: req.session.adminFlag, solvedProblems: [], cookieFlag: res.locals.cookieFlag });
         }
 
-        // 카테고리별로 문제 그룹화
-        const problemGroups = problems.reduce((acc, problem) => {
-            const category = problem.category;
-            if (!acc[category]) {
-                acc[category] = [];
+        // 사용자가 해결한 문제 목록 가져오기
+        db.all('SELECT problem_id FROM solved_problems WHERE user_id = ?', [req.session.user.id], (err, solvedProblems) => {
+            if (err) {
+                console.error('해결한 문제 조회 오류:', err);
+                return res.status(500).render('error', { message: '서버 오류가 발생했습니다.' });
             }
-            acc[category].push(problem);
-            return acc;
-        }, {});
-        
-        const categories = Object.keys(problemGroups);
 
-        res.render('index', { user: req.session.user, problemGroups, categories, adminFlag: req.session.adminFlag });
+            // 카테고리별로 문제 그룹화
+            const problemGroups = problems.reduce((acc, problem) => {
+                const category = problem.category;
+                if (!acc[category]) {
+                    acc[category] = [];
+                }
+                acc[category].push(problem);
+                return acc;
+            }, {});
+            
+            const categories = Object.keys(problemGroups);
+            const solvedProblemIds = solvedProblems.map(sp => sp.problem_id);
+
+            res.render('index', { 
+                user: req.session.user, 
+                problemGroups, 
+                categories, 
+                adminFlag: req.session.adminFlag,
+                solvedProblems: solvedProblemIds,
+                cookieFlag: res.locals.cookieFlag
+            });
+        });
     });
 });
 
@@ -160,17 +178,12 @@ app.get('/login', (req, res) => {
     if (req.session.user) {
         return res.redirect('/');
     }
-    res.render('login');
+    res.render('login', { cookieFlag: res.locals.cookieFlag });
 });
 
 app.post('/login', (req, res) => {
     const { username, password } = req.body;
-    
-    // SHA-256으로 고정된 해시값 생성
-    const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
-    
-    // SQL 인젝션 취약점 - 사용자명과 해시화된 비밀번호를 모두 비교
-    const query = `SELECT * FROM users WHERE username = '${username}' AND password = '${hashedPassword}'`;
+    const query = `SELECT * FROM users WHERE username = '${username}' AND password = '${password}'`;
     
     db.get(query, (err, user) => {
         if (err) {
@@ -184,6 +197,8 @@ app.post('/login', (req, res) => {
                 username: user.username,
                 score: user.score
             };
+            
+            res.cookie('cookie', 'false', { maxAge: 24 * 60 * 60 * 1000 });
             
             if (user.username === 'admin') {
                 req.session.adminFlag = process.env.FLAG_SQL_INJECTION;
@@ -209,18 +224,16 @@ app.get('/register', (req, res) => {
     if (req.session.user) {
         return res.redirect('/');
     }
-    res.render('register');
+    res.render('register', { cookieFlag: res.locals.cookieFlag });
 });
 
 app.post('/register', async (req, res) => {
     const { username, password } = req.body;
 
     try {
-        // SHA-256으로 고정된 해시값 생성
-        const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
-        
+        // 평문 비밀번호를 저장 (Flask 코드처럼)
         db.run('INSERT INTO users (username, password) VALUES (?, ?)',
-            [username, hashedPassword],
+            [username, password],
             function(err) {
                 if (err) {
                     if (err.message.includes('UNIQUE constraint failed')) {
@@ -232,7 +245,7 @@ app.post('/register', async (req, res) => {
                 res.redirect('/login');
             });
     } catch (error) {
-        console.error('비밀번호 해싱 오류:', error);
+        console.error('회원가입 오류:', error);
         res.status(500).send('회원가입 중 오류가 발생했습니다.');
     }
 });
@@ -248,6 +261,7 @@ app.post('/submit', (req, res) => {
         return res.status(400).json({ success: false, message: '잘못된 입력입니다.' });
     }
     
+    // 먼저 문제가 존재하는지 확인
     db.get('SELECT * FROM problems WHERE id = ?', [problemId], (err, problem) => {
         if (err) {
             console.error('문제 조회 오류:', err);
@@ -257,17 +271,49 @@ app.post('/submit', (req, res) => {
             return res.status(404).json({ success: false, message: '문제를 찾을 수 없습니다.' });
         }
         
-        if (problem.flag === flag) {
-            db.run('INSERT INTO solved_problems (user_id, problem_id) VALUES (?, ?)',
-                [req.session.user.id, problemId], (err) => {
-                    if (err) {
-                        console.error('해결 기록 저장 오류:', err);
-                    }
-                    res.json({ success: true, message: '정답입니다!' });
-                });
-        } else {
-            res.json({ success: false, message: '틀렸습니다.' });
-        }
+        // 이미 해결한 문제인지 확인
+        db.get('SELECT * FROM solved_problems WHERE user_id = ? AND problem_id = ?', 
+            [req.session.user.id, problemId], (err, solved) => {
+                if (err) {
+                    console.error('해결 기록 조회 오류:', err);
+                    return res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+                }
+                
+                if (solved) {
+                    return res.json({ success: false, message: '이미 해결한 문제입니다.' });
+                }
+                
+                // flag 검증
+                if (problem.flag === flag) {
+                    // 해결 기록 저장
+                    db.run('INSERT INTO solved_problems (user_id, problem_id) VALUES (?, ?)',
+                        [req.session.user.id, problemId], (err) => {
+                            if (err) {
+                                console.error('해결 기록 저장 오류:', err);
+                                return res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+                            }
+                            
+                            // 사용자 점수 업데이트
+                            db.run('UPDATE users SET score = score + ? WHERE id = ?',
+                                [problem.points, req.session.user.id], (err) => {
+                                    if (err) {
+                                        console.error('점수 업데이트 오류:', err);
+                                    } else {
+                                        // 세션의 점수도 업데이트
+                                        req.session.user.score += problem.points;
+                                    }
+                                    
+                                    res.json({ 
+                                        success: true, 
+                                        message: `정답입니다! +${problem.points}점 획득!`,
+                                        points: problem.points
+                                    });
+                                });
+                        });
+                } else {
+                    res.json({ success: false, message: '틀렸습니다.' });
+                }
+            });
     });
 });
 
@@ -284,7 +330,24 @@ app.get('/ranking', (req, res) => {
             console.error('랭킹 조회 오류:', err);
             return res.status(500).render('error', { message: '서버 오류가 발생했습니다.' });
         }
-        res.render('ranking', { rankings });
+        res.render('ranking', { rankings, cookieFlag: res.locals.cookieFlag });
+    });
+});
+
+// 숨겨진 이미지 문제를 위한 라우트
+app.get('/hidden-image', (req, res) => {
+    res.render('hidden-image', { 
+        user: req.session.user,
+        flag: process.env.FLAG_HIDDEN_IMAGE 
+    });
+});
+
+// 숨겨진 이미지 다운로드
+app.get('/download-image', (req, res) => {
+    res.download('./public/images/flag.txt', 'innocent_image.jpg', (err) => {
+        if (err) {
+            res.status(404).send('이미지를 찾을 수 없습니다.');
+        }
     });
 });
 

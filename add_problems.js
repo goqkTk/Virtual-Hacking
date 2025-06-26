@@ -12,13 +12,6 @@ const problems = [
         points: 50
     },
     {
-        title: "쿠키 조작",
-        description: "쿠키를 수정하면 관리자 권한을 얻을 수 있을지도?",
-        flag: process.env.FLAG_COOKIE_POWER,
-        category: "Web",
-        points: 100
-    },
-    {
         title: "SQL Injection",
         description: "admin 계정으로 로그인하세요",
         flag: process.env.FLAG_SQL_INJECTION,
