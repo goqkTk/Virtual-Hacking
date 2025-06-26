@@ -101,7 +101,7 @@ db.serialize(() => {
 
     // 기본 사용자 추가
     db.run(`INSERT OR IGNORE INTO users (username, password, score) VALUES (?, ?, ?)`, 
-        ['test', '1111', 0]);
+        ['guest', 'guest', 0]);
     db.run(`INSERT OR IGNORE INTO users (username, password, score) VALUES (?, ?, ?)`, 
         ['admin', 'Admin1234!', 10000]);
 });
