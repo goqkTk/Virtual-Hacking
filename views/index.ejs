@@ -38,6 +38,9 @@
             <a class="navbar-brand" href="/">모의 해킹 사이트</a>
             <div class="navbar-nav ms-auto">
                 <% if (user) { %>
+                    <span class="navbar-text me-3 text-light">
+                        <%= user.username %>
+                    </span>
                     <a class="nav-link" href="/ranking">랭킹</a>
                     <a class="nav-link" href="/logout">로그아웃</a>
                 <% } else { %>
@@ -137,18 +140,6 @@
         </div>
     <% } %>
     </div>
-
-    <% if (cookieFlag) { %>
-        <div class="text-center position-fixed bottom-0 start-50 translate-middle-x mb-5" style="z-index:9999;">
-            <span class="fs-3 fw-bold text-success">FLAG: <%= cookieFlag %></span>
-        </div>
-    <% } %>
-
-    <% if (cookieFlag) { %>
-        <script>
-            console.log("FLAG: <%= cookieFlag %>");
-        </script>
-    <% } %>
 
     <% 
       var isLoggedIn = !!user ? 1 : 0;

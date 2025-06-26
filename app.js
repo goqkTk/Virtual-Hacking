@@ -8,7 +8,6 @@ const bcrypt = require('bcrypt');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
-const cookieParser = require('cookie-parser');
 
 const app = express();
 const port = process.env.PORT;
@@ -40,7 +39,6 @@ app.use(bodyParser.json());
 app.use(express.static('public'));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
-app.use(cookieParser());
 
 // 세션 설정
 app.use(session({
@@ -62,17 +60,6 @@ app.use((req, res, next) => {
     res.locals.csrfToken = req.session.csrfToken;
     next();
 });
-
-// CSRF 검증 함수
-function validateCSRF(req, res, next) {
-    if (req.method === 'GET') return next();
-    
-    const token = req.body._csrf || req.headers['x-csrf-token'];
-    if (!token || token !== req.session.csrfToken) {
-        return res.status(403).send('CSRF 토큰이 유효하지 않습니다.');
-    }
-    next();
-}
 
 // 데이터베이스 연결
 const db = new sqlite3.Database(process.env.DB_PATH, (err) => {
@@ -124,11 +111,11 @@ function validateInput(input, maxLength = 100) {
 // 라우트 설정
 app.get('/', (req, res) => {
     if (!req.session.user) {
-        return res.render('index', { user: null, problemGroups: null, categories: null, adminFlag: null, solvedProblems: [], cookieFlag: res.locals.cookieFlag });
+        return res.render('index', { user: null, problemGroups: null, categories: null, adminFlag: null, solvedProblems: [] });
     }
 
     if (req.session.user.username === 'admin') {
-        return res.render('index', { user: req.session.user, problemGroups: {}, categories: [], adminFlag: req.session.adminFlag, solvedProblems: [], cookieFlag: res.locals.cookieFlag });
+        return res.render('index', { user: req.session.user, problemGroups: {}, categories: [], adminFlag: req.session.adminFlag, solvedProblems: [] });
     }
 
     // 문제 목록과 사용자가 해결한 문제 목록을 함께 가져오기
@@ -139,7 +126,7 @@ app.get('/', (req, res) => {
         }
 
         if (!problems || problems.length === 0) {
-            return res.render('index', { user: req.session.user, problemGroups: {}, categories: [], adminFlag: req.session.adminFlag, solvedProblems: [], cookieFlag: res.locals.cookieFlag });
+            return res.render('index', { user: req.session.user, problemGroups: {}, categories: [], adminFlag: req.session.adminFlag, solvedProblems: [] });
         }
 
         // 사용자가 해결한 문제 목록 가져오기
@@ -167,8 +154,7 @@ app.get('/', (req, res) => {
                 problemGroups, 
                 categories, 
                 adminFlag: req.session.adminFlag,
-                solvedProblems: solvedProblemIds,
-                cookieFlag: res.locals.cookieFlag
+                solvedProblems: solvedProblemIds
             });
         });
     });
@@ -178,7 +164,7 @@ app.get('/login', (req, res) => {
     if (req.session.user) {
         return res.redirect('/');
     }
-    res.render('login', { cookieFlag: res.locals.cookieFlag });
+    res.render('login');
 });
 
 app.post('/login', (req, res) => {
@@ -197,8 +183,6 @@ app.post('/login', (req, res) => {
                 username: user.username,
                 score: user.score
             };
-            
-            res.cookie('cookie', 'false', { maxAge: 24 * 60 * 60 * 1000 });
             
             if (user.username === 'admin') {
                 req.session.adminFlag = process.env.FLAG_SQL_INJECTION;
@@ -224,7 +208,6 @@ app.get('/register', (req, res) => {
     if (req.session.user) {
         return res.redirect('/');
     }
-    res.render('register', { cookieFlag: res.locals.cookieFlag });
 });
 
 app.post('/register', async (req, res) => {
@@ -330,7 +313,6 @@ app.get('/ranking', (req, res) => {
             console.error('랭킹 조회 오류:', err);
             return res.status(500).render('error', { message: '서버 오류가 발생했습니다.' });
         }
-        res.render('ranking', { rankings, cookieFlag: res.locals.cookieFlag });
     });
 });
 
