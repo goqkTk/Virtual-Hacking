@@ -98,6 +98,12 @@ db.serialize(() => {
         FOREIGN KEY (user_id) REFERENCES users(id),
         FOREIGN KEY (problem_id) REFERENCES problems(id)
     )`);
+
+    // 기본 사용자 추가
+    db.run(`INSERT OR IGNORE INTO users (username, password, score) VALUES (?, ?, ?)`, 
+        ['test', '1111', 0]);
+    db.run(`INSERT OR IGNORE INTO users (username, password, score) VALUES (?, ?, ?)`, 
+        ['admin', 'Admin1234!', 10000]);
 });
 
 // 입력 검증 함수
@@ -208,6 +214,7 @@ app.get('/register', (req, res) => {
     if (req.session.user) {
         return res.redirect('/');
     }
+    res.render('register');
 });
 
 app.post('/register', async (req, res) => {
@@ -313,6 +320,7 @@ app.get('/ranking', (req, res) => {
             console.error('랭킹 조회 오류:', err);
             return res.status(500).render('error', { message: '서버 오류가 발생했습니다.' });
         }
+        res.render('ranking', { rankings });
     });
 });
 
