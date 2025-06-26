@@ -12,6 +12,16 @@ const crypto = require('crypto');
 const app = express();
 const port = process.env.PORT;
 
+// HTTPS로 접속 시 HTTP로 리다이렉트
+app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] === 'https') {
+        // 80번 포트가 아니라면 포트번호를 명시하세요 (예: :3000)
+        const host = req.headers.host.replace(/:443$/, '');
+        return res.redirect('http://' + host + req.url);
+    }
+    next();
+});
+
 // 보안 미들웨어 설정
 app.use(helmet({
     contentSecurityPolicy: {
